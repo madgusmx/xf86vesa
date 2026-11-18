@@ -51,6 +51,12 @@ source «directory» `/mnt`, or simply `rpm -i /mnt/suse/xsrv1/xf86vesa.rpm`.
 |---|---|---|
 | ![YaST sees the add-on CD](doc/23-cd-yast-series.png) | ![xf86vesa marked](doc/24-cd-yast-marcado.png) | ![INSTALLATION COMPLETE](doc/25-cd-yast-instalado.png) |
 
+## Restorer (no YaST)
+
+[`restaurador/`](restaurador/) builds a boot CD that copies a **finished** SuSE Linux 5.3 installation (with xf86vesa
+already configured) to an IDE disk, for PCs where the 1998 installer fails. It ships no system: you pack your own
+with `hacer_tgz.sh`. Details and the Linux 2.0 lessons learned are in its README.
+
 ## What it is
 A «non-picky» X for 1998 Linux: **no modelines, no clocks, no monitor frequencies**. The driver asks the video
 BIOS which modes it has (VBE `4F00`/`4F01`) and sets them with the same BIOS (`4F02`, linear framebuffer), like DOS

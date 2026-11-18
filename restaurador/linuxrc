@@ -1,0 +1,135 @@
+#!/bin/sh
+# linuxrc del CD restaurador de SuSE Linux 5.3 (retroblog, solo laboratorio).
+# Corre en el initrd con las herramientas del propio SuSE 5.3: busca el CD, elige el disco IDE, lo particiona
+# (hda1 /boot 200 MB, hda2 swap 128 MB, hda3 / el resto), extrae los tgz, instala LILO y reinicia.
+PATH=/bin:/sbin
+export PATH
+mount -t proc proc /proc
+ldconfig 2>/dev/null
+
+echo
+echo "=================================================================="
+echo "  Restaurador de S.u.S.E. Linux 5.3  -  retroblog (laboratorio)"
+echo "  KDE 1.0 + driver VESA de XFree86 3.3.2 ya configurado"
+echo "=================================================================="
+echo
+
+# 1. el CD (el que tiene /restaura/RESTAURA.ID)
+CD=""
+for d in hdc hdd hdb hda hde hdf hdg hdh; do
+    if mount -t iso9660 -o ro /dev/$d /cdrom 2>/dev/null; then
+        if [ -f /cdrom/restaura/RESTAURA.ID ]; then CD=$d; break; fi
+        umount /cdrom
+    fi
+done
+if [ -z "$CD" ]; then
+    echo "No encontre el CD restaurador. Revisa que la unidad sea IDE/ATAPI."
+    echo "Abro una consola (sal con exit para reiniciar)."; /bin/sh; reboot -f
+fi
+echo "CD restaurador en /dev/$CD"
+
+# 2. el disco destino: el primer disco IDE que no sea el CD
+DISCO=""
+for d in hda hdb hdc hdd hde hdf hdg hdh; do
+    [ "$d" = "$CD" ] && continue
+    t=`sfdisk -s /dev/$d 2>/dev/null`
+    if [ -n "$t" ] && [ "$t" -gt 0 ] 2>/dev/null; then DISCO=$d; TAM=$t; break; fi
+done
+if [ -z "$DISCO" ]; then
+    echo "No encontre ningun disco IDE. En PCs con SATA: en el BIOS pon el modo SATA en IDE / Legacy / Compatible."
+    /bin/sh; reboot -f
+fi
+MB=$((TAM / 1024))
+echo "Disco destino: /dev/$DISCO  ($MB MB)"
+if [ $MB -lt 4600 ]; then
+    echo "El disco es muy chico: hacen falta al menos 4600 MB (el sistema ocupa unos 3.7 GB, mas /boot, swap y lo que usa ext2)."
+    /bin/sh; reboot -f
+fi
+echo
+sfdisk -l /dev/$DISCO 2>/dev/null
+echo
+echo "ATENCION: se BORRA TODO /dev/$DISCO y se restaura SuSE Linux 5.3."
+echo -n "Escribe BORRAR (en mayusculas) para seguir, otra cosa para salir a una consola: "
+read RESP
+if [ "$RESP" != "BORRAR" ]; then
+    echo "Cancelado. Consola de rescate (exit para reiniciar)."; /bin/sh; reboot -f
+fi
+
+# 3. particiones (antes: hdparm para no escribir de a un sector de 512 bytes: multisector, E/S de 32 bits y DMA
+#    si el BIOS/controlador lo permiten; en PIO puro restaurar 4 GB toma horas)
+hdparm -m16 -c1 /dev/$DISCO > /dev/null 2>&1
+hdparm -d1 /dev/$DISCO > /dev/null 2>&1
+hdparm -m -c -d /dev/$DISCO 2>/dev/null | while read l; do [ -n "$l" ] && echo "  $l"; done
+# particionar
+echo "Particionando /dev/$DISCO ..."
+sfdisk -uM /dev/$DISCO > /tmp/sfdisk.log 2>&1 <<EOF
+,200,83,*
+,128,82
+,,83
+EOF
+if [ $? -ne 0 ]; then echo "sfdisk fallo:"; cat /tmp/sfdisk.log; /bin/sh; reboot -f; fi
+sfdisk -l /dev/$DISCO
+
+echo "Formateando ..."
+mke2fs /dev/${DISCO}1 > /dev/null || { echo "mke2fs fallo en ${DISCO}1"; /bin/sh; }
+mke2fs /dev/${DISCO}3 > /dev/null || { echo "mke2fs fallo en ${DISCO}3"; /bin/sh; }
+mkswap /dev/${DISCO}2 > /dev/null
+
+mount -t ext2 /dev/${DISCO}3 /mnt
+mkdir -p /mnt/boot
+mount -t ext2 /dev/${DISCO}1 /mnt/boot
+
+# 4. los archivos: cada tgz en pedazos de 600 MB (el iso9660 de Linux 2.0 trata los archivos de mas de 700 MB
+#    como «defective cdrom», activa «cruft» y recorta todos los tamanos a 24 bits)
+extraer() {    # $1 = nombre, $2 = destino
+    echo "Restaurando $1 en $2 ..."
+    mkdir -p $2
+    rm -f /tmp/gz.rc
+    (cat /cdrom/restaura/$1.tgz.* | gzip -dc; echo $? > /tmp/gz.rc) | tar -xpf - -C $2
+    rc=$?
+    g=`cat /tmp/gz.rc`; [ "$g" = 141 ] && g=0   # 141 = SIGPIPE: tar ya leyó el fin del archivo y cerró antes que gzip; no es error
+    if [ "$rc" != 0 ] || [ "$g" != 0 ]; then
+        echo "ERROR restaurando $1 (gzip `cat /tmp/gz.rc`, tar $rc). No se instala LILO."
+        echo "Consola de rescate (exit para reiniciar)."; /bin/sh; reboot -f
+    fi
+}
+extraer raiz /mnt
+extraer boot /mnt/boot
+extraer usr  /mnt/usr
+extraer opt  /mnt/opt
+extraer home /mnt/home
+
+# 5. un solo disco: fstab y LILO nuevos (el kernel se copia a /boot para que LILO lo alcance en discos grandes)
+cat > /mnt/etc/fstab <<EOF
+/dev/${DISCO}3       /                         ext2            defaults   1   1
+/dev/${DISCO}1       /boot                     ext2            defaults   1   2
+/dev/${DISCO}2       swap                      swap            defaults   0   0
+/dev/$CD        /cdrom                    iso9660         ro,noauto,user 0   0
+none            /proc                     proc            defaults   0   0
+EOF
+cat > /mnt/etc/lilo.conf <<EOF
+# LILO del restaurador (retroblog): kernel en /boot, linear para discos grandes
+boot=/dev/$DISCO
+linear
+prompt
+timeout=50
+vga=normal
+image=/boot/vmlinuz
+    root=/dev/${DISCO}3
+    label=linux
+    read-only
+EOF
+cp /mnt/vmlinuz /mnt/boot/vmlinuz
+echo "Instalando LILO ..."
+lilo -r /mnt -C /etc/lilo.conf || { echo "lilo fallo"; /bin/sh; }
+
+sync
+umount /mnt/boot
+umount /mnt
+umount /cdrom
+echo
+echo "Listo. Saca el CD; al reiniciar arranca SuSE Linux 5.3."
+echo "Usuario retro sin contrasena; root: cambiame (pide cambiarla al entrar)."
+echo -n "Enter para reiniciar ... "
+read RESP
+reboot -f
