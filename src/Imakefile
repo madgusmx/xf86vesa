@@ -1,0 +1,27 @@
+XCOMM Driver VESA (VBE 2.0+) para XF86_SVGA de XFree86 3.3.2 -- retroblog 2026
+#include <Server.tmpl>
+
+SRCS = vesa_driver.c vbe_rm.c
+
+OBJS = vesa_driver.o vbe_rm.o
+
+#if XF86LinkKit
+INCLUDES = -I. -I../../../include -I../../../include/X11 -I../..
+#else
+INCLUDES = -I. -I../../../common -I../../../common_hw -I../../../os-support \
+           -I../../vga -I$(SERVERSRC)/include -I$(XINCLUDESRC)
+#endif
+
+#if MakeHasPosixVariableSubstitutions
+SubdirLibraryRule($(OBJS))
+#endif
+NormalLibraryObjectRule()
+
+NormalRelocatableTarget(vesa_drv,$(OBJS))
+
+InstallLinkKitNonExecFile(vesa_driver.c,$(LINKKITDIR)/drivers/vga256/vesa)
+InstallLinkKitNonExecFile(vbe_rm.c,$(LINKKITDIR)/drivers/vga256/vesa)
+InstallLinkKitNonExecFile(vbe_rm.h,$(LINKKITDIR)/drivers/vga256/vesa)
+InstallLinkKitNonExecFile(Imakefile,$(LINKKITDIR)/drivers/vga256/vesa)
+
+DependTarget()

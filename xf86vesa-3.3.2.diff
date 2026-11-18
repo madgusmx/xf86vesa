@@ -1,0 +1,745 @@
+diff -ruN a/xc/config/cf/xfree86.cf b/xc/config/cf/xfree86.cf
+--- a/xc/config/cf/xfree86.cf	2026-11-17 22:37:43.680711458 -0600
++++ b/xc/config/cf/xfree86.cf	2026-11-17 22:37:43.684711445 -0600
+@@ -378,7 +378,7 @@
+ #  define XF86SvgaDrivers	nv et4000 et3000 pvga1 gvga ati sis tvga8900 \
+ 				cirrus ncr77c22 compaq mga oak al2101 \
+ 				ali cl64xx video7 ark mx realtek apm \
+-				s3v s3_svga chips generic
++				s3v s3_svga chips vesa generic
+ # endif
+ #endif
+ 
+diff -ruN a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/Imakefile b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/Imakefile
+--- a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/Imakefile	1969-12-31 18:00:00.000000000 -0600
++++ b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/Imakefile	2026-11-17 22:37:43.684711445 -0600
+@@ -0,0 +1,27 @@
++XCOMM Driver VESA (VBE 2.0+) para XF86_SVGA de XFree86 3.3.2 -- retroblog 2026
++#include <Server.tmpl>
++
++SRCS = vesa_driver.c vbe_rm.c
++
++OBJS = vesa_driver.o vbe_rm.o
++
++#if XF86LinkKit
++INCLUDES = -I. -I../../../include -I../../../include/X11 -I../..
++#else
++INCLUDES = -I. -I../../../common -I../../../common_hw -I../../../os-support \
++           -I../../vga -I$(SERVERSRC)/include -I$(XINCLUDESRC)
++#endif
++
++#if MakeHasPosixVariableSubstitutions
++SubdirLibraryRule($(OBJS))
++#endif
++NormalLibraryObjectRule()
++
++NormalRelocatableTarget(vesa_drv,$(OBJS))
++
++InstallLinkKitNonExecFile(vesa_driver.c,$(LINKKITDIR)/drivers/vga256/vesa)
++InstallLinkKitNonExecFile(vbe_rm.c,$(LINKKITDIR)/drivers/vga256/vesa)
++InstallLinkKitNonExecFile(vbe_rm.h,$(LINKKITDIR)/drivers/vga256/vesa)
++InstallLinkKitNonExecFile(Imakefile,$(LINKKITDIR)/drivers/vga256/vesa)
++
++DependTarget()
+diff -ruN a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.c b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.c
+--- a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.c	1969-12-31 18:00:00.000000000 -0600
++++ b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.c	2026-11-17 22:37:43.684711445 -0600
+@@ -0,0 +1,232 @@
++/*
++ * vbe_rm.c - int 10h en modo real desde Linux 2.0 (syscall vm86, la 113 «vieja»).
++ *
++ * Como LRMI (la Linux Real Mode Interface de 1998), pero mínima y propia:
++ *   - página 0 (vectores de interrupción + datos del BIOS) mapeada de /dev/mem en privado (copy-on-write);
++ *   - 0x1000-0xA0000 de /dev/zero (memoria baja privada), con una copia del EBDA del BIOS;
++ *   - 0xA0000-0x100000 (memoria de video y ROMs) de /dev/mem compartida.
++ * El código del BIOS corre en modo virtual 8086; las instrucciones IN/OUT que el kernel no deja pasar vuelven
++ * como VM86_UNKNOWN y se emulan aquí. La llamada termina en el «hlt» que sigue al «int 10h» del stub.
++ *
++ * Copyright (c) 2026 retroblog (canaldelasrecetas.com). Licencia estilo MIT/X11, ver vesa_driver.c.
++ */
++#include <stdio.h>
++#include <string.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/mman.h>
++#include <asm/vm86.h>
++#include "vbe_rm.h"
++
++char VBErmError[160];
++int  VBErmVerbose = 0;
++static int listo = 0;
++
++#define LIN(seg, off)  ((unsigned char *)((((unsigned long)(seg)) << 4) + ((unsigned long)(off) & 0xFFFF)))
++
++static int
++vm86old_llamada(struct vm86_struct *v)
++{
++    int r;
++    __asm__ __volatile__("pushl %%ebx\n\tmovl %2,%%ebx\n\tint $0x80\n\tpopl %%ebx"
++                         : "=a" (r) : "0" (113), "r" (v) : "memory");
++    return r;
++}
++
++int
++VBErmInit(void)
++{
++    int fdm, fdz;
++    caddr_t m;
++    unsigned long ebda, tam;
++
++    if (listo)
++        return 0;
++    fdm = open("/dev/mem", O_RDWR);
++    fdz = open("/dev/zero", O_RDWR);
++    if (fdm < 0 || fdz < 0) {
++        sprintf(VBErmError, "no se pudo abrir /dev/mem o /dev/zero");
++        return -1;
++    }
++    /* página 0: IVT + BDA, privada */
++    m = mmap((caddr_t)0, 0x1000, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_FIXED | MAP_PRIVATE, fdm, 0);
++    if (m != (caddr_t)0) {
++        sprintf(VBErmError, "mmap de la página 0 falló");
++        return -1;
++    }
++    /* memoria baja privada en ceros */
++    m = mmap((caddr_t)0x1000, 0xA0000 - 0x1000, PROT_READ | PROT_WRITE | PROT_EXEC,
++             MAP_FIXED | MAP_PRIVATE, fdz, 0);
++    if (m != (caddr_t)0x1000) {
++        sprintf(VBErmError, "mmap de la memoria baja falló");
++        return -1;
++    }
++    /* video + ROMs, compartido */
++    m = mmap((caddr_t)0xA0000, 0x60000, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_FIXED | MAP_SHARED,
++             fdm, 0xA0000);
++    if (m != (caddr_t)0xA0000) {
++        sprintf(VBErmError, "mmap de 0xA0000-0xFFFFF falló");
++        return -1;
++    }
++    /* copia del EBDA (segmento en 0x40:0x0E), si es razonable */
++    ebda = (unsigned long)(*(unsigned short *)0x40E) << 4;
++    if (ebda >= 0x80000 && ebda < 0xA0000) {
++        unsigned long base = ebda & ~0xFFFUL;
++        tam = 0xA0000 - base;
++        m = mmap((caddr_t)0, tam, PROT_READ, MAP_SHARED, fdm, base);
++        if (m != (caddr_t)-1) {
++            memcpy((void *)base, (void *)m, tam);
++            munmap(m, tam);
++        }
++    }
++    close(fdz);
++    close(fdm);
++    /* stub: int 10h ; hlt */
++    {
++        unsigned char *s = LIN(VBE_SEG, VBE_OFF_STUB);
++        s[0] = 0xCD; s[1] = 0x10; s[2] = 0xF4;
++    }
++    listo = 1;
++    return 0;
++}
++
++static void
++empujar16(struct vm86_regs *r, unsigned short v)
++{
++    r->esp = (r->esp - 2) & 0xFFFF;
++    *(unsigned short *)LIN(r->ss, r->esp) = v;
++}
++
++static void
++emular_int(struct vm86_regs *r, int n)
++{
++    unsigned short *ivt = (unsigned short *)0;
++    empujar16(r, (unsigned short)r->eflags);
++    empujar16(r, r->cs);
++    empujar16(r, (unsigned short)r->eip);
++    r->eflags &= ~(IF_MASK | TF_MASK);
++    r->cs = ivt[n * 2 + 1];
++    r->eip = ivt[n * 2];
++}
++
++/* Emula la instrucción de E/S en cs:ip. 1 = emulada, 0 = no era E/S. */
++static int
++emular_io(struct vm86_regs *r)
++{
++    unsigned char *p = LIN(r->cs, r->eip), *ini = p;
++    int op32 = 0, rep = 0, seg = -1, cuenta, paso;
++    unsigned short port;
++
++    for (;;) {
++        if (*p == 0x66) { op32 = 1; p++; }
++        else if (*p == 0x67) { p++; }
++        else if (*p == 0xF3 || *p == 0xF2) { rep = 1; p++; }
++        else if (*p == 0x26) { seg = r->es; p++; }
++        else if (*p == 0x2E) { seg = r->cs; p++; }
++        else if (*p == 0x36) { seg = r->ss; p++; }
++        else if (*p == 0x3E) { seg = r->ds; p++; }
++        else break;
++    }
++    switch (*p) {
++    case 0xE4: port = p[1]; r->eax = (r->eax & ~0xFFUL) | (vberm_inb(port) & 0xFF); p += 2; break;
++    case 0xE5: port = p[1];
++        if (op32) r->eax = vberm_inl(port);
++        else r->eax = (r->eax & ~0xFFFFUL) | (vberm_inw(port) & 0xFFFF);
++        p += 2; break;
++    case 0xE6: vberm_outb(p[1], r->eax & 0xFF); p += 2; break;
++    case 0xE7: if (op32) vberm_outl(p[1], r->eax); else vberm_outw(p[1], r->eax & 0xFFFF); p += 2; break;
++    case 0xEC: r->eax = (r->eax & ~0xFFUL) | (vberm_inb(r->edx & 0xFFFF) & 0xFF); p++; break;
++    case 0xED:
++        if (op32) r->eax = vberm_inl(r->edx & 0xFFFF);
++        else r->eax = (r->eax & ~0xFFFFUL) | (vberm_inw(r->edx & 0xFFFF) & 0xFFFF);
++        p++; break;
++    case 0xEE: vberm_outb(r->edx & 0xFFFF, r->eax & 0xFF); p++; break;
++    case 0xEF: if (op32) vberm_outl(r->edx & 0xFFFF, r->eax); else vberm_outw(r->edx & 0xFFFF, r->eax & 0xFFFF);
++        p++; break;
++    case 0x6C: case 0x6D: case 0x6E: case 0x6F:
++        paso = (*p == 0x6C || *p == 0x6E) ? 1 : (op32 ? 4 : 2);
++        if (r->eflags & 0x400) paso = -paso;           /* DF */
++        cuenta = rep ? (int)(r->ecx & 0xFFFF) : 1;
++        port = r->edx & 0xFFFF;
++        while (cuenta-- > 0) {
++            if (*p == 0x6C || *p == 0x6D) {             /* INS: es:di */
++                unsigned char *d = LIN(r->es, r->edi);
++                if (*p == 0x6C) *d = vberm_inb(port);
++                else if (op32) *(unsigned long *)d = vberm_inl(port);
++                else *(unsigned short *)d = vberm_inw(port);
++                r->edi = (r->edi & ~0xFFFFUL) | ((r->edi + paso) & 0xFFFF);
++            } else {                                      /* OUTS: ds:si (o segmento forzado) */
++                unsigned char *s = LIN(seg >= 0 ? seg : r->ds, r->esi);
++                if (*p == 0x6E) vberm_outb(port, *s);
++                else if (op32) vberm_outl(port, *(unsigned long *)s);
++                else vberm_outw(port, *(unsigned short *)s);
++                r->esi = (r->esi & ~0xFFFFUL) | ((r->esi + paso) & 0xFFFF);
++            }
++            if (rep) r->ecx = (r->ecx & ~0xFFFFUL) | ((r->ecx - 1) & 0xFFFF);
++        }
++        p++; break;
++    default:
++        return 0;
++    }
++    r->eip = (r->eip + (p - ini)) & 0xFFFF;
++    return 1;
++}
++
++int
++VBErmInt10(VBERegs *e)
++{
++    struct vm86_struct v;
++    struct vm86_regs *r = &v.regs;
++    int ret, vueltas = 0;
++
++    if (VBErmInit())
++        return -1;
++    memset(&v, 0, sizeof(v));
++    r->eax = e->eax; r->ebx = e->ebx; r->ecx = e->ecx; r->edx = e->edx;
++    r->esi = e->esi; r->edi = e->edi; r->ebp = e->ebp;
++    r->es = e->es; r->ds = e->ds; r->fs = 0; r->gs = 0;
++    r->cs = VBE_SEG; r->eip = VBE_OFF_STUB;
++    r->ss = VBE_SEG; r->esp = VBE_STACK_TOP;
++    r->eflags = IF_MASK | 0x2;
++    v.cpu_type = CPU_586;
++
++    for (;;) {
++        if (++vueltas > 5000000) {
++            sprintf(VBErmError, "el BIOS no volvió (cs:ip %04x:%04lx)", r->cs, r->eip);
++            return -1;
++        }
++        ret = vm86old_llamada(&v);
++        if (ret < 0) {
++            sprintf(VBErmError, "vm86 devolvió el error %d", -ret);
++            return -1;
++        }
++        switch (VM86_TYPE(ret)) {
++        case VM86_SIGNAL:
++        case VM86_STI:
++        case VM86_PICRETURN:
++            continue;
++        case VM86_INTx:
++            emular_int(r, VM86_ARG(ret));
++            continue;
++        case VM86_UNKNOWN: {
++            unsigned char *p = LIN(r->cs, r->eip);
++            if (*p == 0xF4 && r->cs == VBE_SEG && r->eip == VBE_OFF_STUB + 2)
++                goto fin;                                /* el hlt del stub: terminó */
++            if (emular_io(r))
++                continue;
++            sprintf(VBErmError, "instrucción desconocida %02x %02x %02x en %04x:%04lx",
++                    p[0], p[1], p[2], r->cs, r->eip);
++            return -1;
++        }
++        default:
++            sprintf(VBErmError, "vm86: retorno inesperado %d", ret);
++            return -1;
++        }
++    }
++fin:
++    e->eax = r->eax; e->ebx = r->ebx; e->ecx = r->ecx; e->edx = r->edx;
++    e->esi = r->esi; e->edi = r->edi; e->ebp = r->ebp;
++    e->es = r->es; e->ds = r->ds;
++    return 0;
++}
+diff -ruN a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.h b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.h
+--- a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.h	1969-12-31 18:00:00.000000000 -0600
++++ b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vbe_rm.h	2026-11-17 22:37:43.684711445 -0600
+@@ -0,0 +1,38 @@
++/*
++ * vbe_rm.h - llamadas al BIOS de video en modo real (int 10h) desde Linux 2.0 con vm86().
++ *
++ * Copyright (c) 2026 retroblog (canaldelasrecetas.com).
++ * Licencia: la misma de XFree86 (estilo MIT/X11). Ver vesa_driver.c.
++ */
++#ifndef VBE_RM_H
++#define VBE_RM_H
++
++typedef struct {
++    unsigned long eax, ebx, ecx, edx, esi, edi, ebp;
++    unsigned short es, ds;
++} VBERegs;
++
++/* Segmento de trabajo en la memoria baja privada (lineal 0x10000): stub, buffers y pila. */
++#define VBE_SEG        0x1000
++#define VBE_OFF_STUB   0x0000      /* int 10h ; hlt */
++#define VBE_OFF_INFO   0x0100      /* VbeInfoBlock (512 bytes) */
++#define VBE_OFF_MODE   0x0400      /* ModeInfoBlock (256 bytes) */
++#define VBE_STACK_TOP  0xF000
++
++#define VBE_LIN(seg, off)   ((unsigned char *)(((unsigned long)(seg) << 4) + (unsigned long)(off)))
++#define VBE_FAR(p)          VBE_LIN((p) >> 16, (p) & 0xFFFF)   /* puntero lejano seg:off guardado como dword */
++
++int  VBErmInit(void);                       /* mapea el primer MB; 0 = bien */
++int  VBErmInt10(VBERegs *r);                /* 0 = bien, -1 = error de vm86 */
++extern char VBErmError[160];
++extern int  VBErmVerbose;
++
++/* Funciones de E/S que el módulo usa para emular IN/OUT (las da quien lo enlaza). */
++unsigned int  vberm_inb(unsigned short port);
++unsigned int  vberm_inw(unsigned short port);
++unsigned int  vberm_inl(unsigned short port);
++void vberm_outb(unsigned short port, unsigned int v);
++void vberm_outw(unsigned short port, unsigned int v);
++void vberm_outl(unsigned short port, unsigned int v);
++
++#endif
+diff -ruN a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vesa_driver.c b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vesa_driver.c
+--- a/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vesa_driver.c	1969-12-31 18:00:00.000000000 -0600
++++ b/xc/programs/Xserver/hw/xfree86/vga256/drivers/vesa/vesa_driver.c	2026-11-17 22:37:43.684711445 -0600
+@@ -0,0 +1,420 @@
++/*
++ * vesa_driver.c - driver VESA (VBE 2.0+) para el servidor XF86_SVGA de XFree86 3.3.2.
++ *
++ * «No quisquilloso»: no usa modelines, relojes ni frecuencias de monitor. Le pregunta al BIOS de video qué modos
++ * tiene (VBE 4F00/4F01), los ofrece como modos propios del driver (ChipBuiltinModes) y los pone con el mismo BIOS
++ * (4F02, framebuffer lineal), como hacían los juegos de DOS. El BIOS se llama en modo real con vm86() (vbe_rm.c).
++ *
++ * XF86Config mínimo:
++ *     Section "Device"   Identifier "VESA"  Chipset "vesa"  EndSection
++ *     Section "Screen"   Driver "svga"  Device "VESA"  Monitor "Cualquiera"  DefaultColorDepth 16
++ *         SubSection "Display"  Depth 16  Modes "1024x768" "800x600"  EndSubSection   (Modes es opcional)
++ *     EndSection
++ * Sin «Modes», ofrece todos los modos del BIOS hasta 1280x1024 y arranca en el mas grande.
++ *
++ * Copyright (c) 2026 retroblog (canaldelasrecetas.com)
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
++ * documentation files (the "Software"), to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
++ * to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions
++ * of the Software.
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
++ * THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include "X.h"
++#include "input.h"
++#include "screenint.h"
++
++#include "compiler.h"
++#include "xf86.h"
++#include "xf86Priv.h"
++#include "xf86_OSlib.h"
++#include "xf86_HWlib.h"
++#define XCONFIG_FLAGS_ONLY
++#include "xf86_Config.h"
++#include "vga.h"
++#include "vbe_rm.h"
++
++typedef struct {
++    vgaHWRec std;               /* lo de siempre del VGA (para volver a texto con las fuentes) */
++    int vbeModo;                /* modo VBE de este estado */
++    int grafico;                /* TRUE: se pone con 4F02; FALSE: modo de texto + vgaHWRestore */
++} vgaVESARec, *vgaVESAPtr;
++
++static Bool  VESAProbe();
++static char *VESAIdent();
++static void  VESAEnterLeave();
++static Bool  VESAInit();
++static int   VESAValidMode();
++static void *VESASave();
++static void  VESARestore();
++static void  VESAAdjust();
++static int   VESAPitch();
++
++vgaVideoChipRec VESA = {
++    VESAProbe,
++    VESAIdent,
++    VESAEnterLeave,
++    VESAInit,
++    VESAValidMode,
++    VESASave,
++    VESARestore,
++    VESAAdjust,
++    vgaHWSaveScreen,
++    (void (*)())NoopDDA,        /* GetMode */
++    (void (*)())NoopDDA,        /* FbInit */
++    (void (*)())NoopDDA,        /* SetRead: sin bancos, todo lineal */
++    (void (*)())NoopDDA,
++    (void (*)())NoopDDA,
++    0x10000,
++    0x10000,
++    16,
++    0xFFFF,
++    0x00000, 0x10000,
++    0x00000, 0x10000,
++    FALSE,
++    VGA_NO_DIVIDE_VERT,
++    {0,},
++    8,
++    TRUE,                       /* ChipUseLinearAddressing */
++    0,                          /* ChipLinearBase (lo pone el Probe) */
++    0,                          /* ChipLinearSize */
++    TRUE,                       /* 16 bpp */
++    TRUE,                       /* 24 bpp */
++    TRUE,                       /* 32 bpp */
++    NULL,                       /* ChipBuiltinModes (los arma el Probe con lo que dice el BIOS) */
++    1,
++    1
++};
++
++#define new ((vgaVESAPtr)vgaNewVideoState)
++#define MAXMODOS 64
++
++static DisplayModeRec modos[MAXMODOS];
++static int numeroVBE[MAXMODOS];
++static int nModos = 0;
++static int pitchBytes = 0;
++static char nombres[MAXMODOS][16];
++
++/* E/S para la emulación de IN/OUT de vbe_rm.c, con las del servidor */
++unsigned int vberm_inb(unsigned short p) { return inb(p); }
++unsigned int vberm_inw(unsigned short p) { return inw(p); }
++unsigned int vberm_inl(unsigned short p) { return inl(p); }
++void vberm_outb(unsigned short p, unsigned int v) { outb(p, v); }
++void vberm_outw(unsigned short p, unsigned int v) { outw(p, v); }
++void vberm_outl(unsigned short p, unsigned int v) { outl(p, v); }
++
++static int
++vbe(VBERegs *r)
++{
++    int ret = VBErmInt10(r);
++    if (ret)
++        ErrorF("%s %s: error del BIOS: %s\n", XCONFIG_PROBED, vga256InfoRec.name, VBErmError);
++    return ret;
++}
++
++static char *
++VESAIdent(n)
++int n;
++{
++    static char *chipsets[] = {"vesa"};
++    if (n + 1 > sizeof(chipsets) / sizeof(char *))
++        return NULL;
++    return chipsets[n];
++}
++
++static void
++VESAEnterLeave(enter)
++Bool enter;
++{
++    unsigned char temp;
++
++    if (enter) {
++        xf86EnableIOPorts(vga256InfoRec.scrnIndex);
++        vgaIOBase = (inb(0x3CC) & 0x01) ? 0x3D0 : 0x3B0;
++        outb(vgaIOBase + 4, 0x11); temp = inb(vgaIOBase + 5);
++        outb(vgaIOBase + 5, temp & 0x7F);
++    } else {
++        xf86DisableIOPorts(vga256InfoRec.scrnIndex);
++    }
++}
++
++/* El modo pedido en XF86Config («1024x768») está en la lista del BIOS? Devuelve el índice o -1. */
++static int
++buscar(cand, n, nombre)
++DisplayModePtr cand; int n; char *nombre;
++{
++    int i;
++    for (i = 0; i < n; i++)
++        if (!strcmp(cand[i].name, nombre))
++            return i;
++    return -1;
++}
++
++static void
++llenar(m, ancho, alto, nombre)
++DisplayModePtr m; int ancho, alto; char *nombre;
++{
++    /* tiempos inventados pero coherentes: el BIOS pone los suyos; X solo usa HDisplay/VDisplay */
++    memset(m, 0, sizeof(*m));
++    m->name = nombre;
++    m->Clock = 0;
++    m->HDisplay = ancho; m->HSyncStart = ancho + 16; m->HSyncEnd = ancho + 112; m->HTotal = ancho + 160;
++    m->VDisplay = alto; m->VSyncStart = alto + 3; m->VSyncEnd = alto + 6; m->VTotal = alto + 30;
++    m->CrtcHDisplay = m->HDisplay; m->CrtcHSyncStart = m->HSyncStart;
++    m->CrtcHSyncEnd = m->HSyncEnd; m->CrtcHTotal = m->HTotal;
++    m->CrtcVDisplay = m->VDisplay; m->CrtcVSyncStart = m->VSyncStart;
++    m->CrtcVSyncEnd = m->VSyncEnd; m->CrtcVTotal = m->VTotal;
++    m->SynthClock = 25175;
++}
++
++static Bool
++VESAProbe()
++{
++    VBERegs r;
++    unsigned char *info = VBE_LIN(VBE_SEG, VBE_OFF_INFO), *mi = VBE_LIN(VBE_SEG, VBE_OFF_MODE);
++    unsigned short *lista, nums[256];
++    DisplayModeRec cand[MAXMODOS];
++    int candVBE[MAXMODOS], candPitch[MAXMODOS];
++    int n = 0, nc = 0, i, j, bpp = vga256InfoRec.bitsPerPixel, verde;
++    unsigned long lineal = 0;
++    int memKB, maxAncho = 1280, maxAlto = 1024;
++
++    xf86ClearIOPortList(vga256InfoRec.scrnIndex);
++    xf86AddIOPorts(vga256InfoRec.scrnIndex, Num_VGA_IOPorts, VGA_IOPorts);
++
++    if (vga256InfoRec.chipset && StrCaseCmp(vga256InfoRec.chipset, VESAIdent(0)))
++        return FALSE;
++    VESAEnterLeave(ENTER);
++
++    if (VBErmInit()) {
++        ErrorF("%s %s: vesa: %s\n", XCONFIG_PROBED, vga256InfoRec.name, VBErmError);
++        VESAEnterLeave(LEAVE);
++        return FALSE;
++    }
++    memcpy(info, "VBE2", 4);
++    memset(&r, 0, sizeof r);
++    r.eax = 0x4F00; r.es = VBE_SEG; r.edi = VBE_OFF_INFO;
++    if (vbe(&r) || (r.eax & 0xFFFF) != 0x004F || memcmp(info, "VESA", 4) || info[5] < 2) {
++        if (vga256InfoRec.chipset)
++            ErrorF("%s %s: vesa: el BIOS no tiene VBE 2.0 o superior\n", XCONFIG_PROBED, vga256InfoRec.name);
++        VESAEnterLeave(LEAVE);
++        return FALSE;
++    }
++    memKB = *(unsigned short *)(info + 18) * 64;
++    {
++        unsigned char *oem = VBE_FAR(*(unsigned long *)(info + 6));
++        char b[64];
++        for (i = 0; i < 63 && oem[i]; i++) b[i] = oem[i];
++        b[i] = 0;
++        ErrorF("%s %s: vesa: VBE %d.%d, %d KB, OEM \"%s\"\n", XCONFIG_PROBED, vga256InfoRec.name,
++               info[5], info[4], memKB, b);
++    }
++    lista = (unsigned short *)VBE_FAR(*(unsigned long *)(info + 14));
++    while (n < 256 && lista[n] != 0xFFFF) { nums[n] = lista[n]; n++; }
++
++    /* profundidad 15 o 16: lo dice el verde (5 o 6 bits) */
++    verde = (bpp == 16) ? (vga256InfoRec.depth == 15 ? 5 : 6) : 0;
++    if (vga256InfoRec.modes) {                       /* con Modes en XF86Config, el mas grande pedido es el tope */
++        DisplayModePtr p = vga256InfoRec.modes;
++        maxAncho = maxAlto = 0;
++        do {
++            int a, b;
++            if (sscanf(p->name, "%dx%d", &a, &b) == 2) {
++                if (a > maxAncho) maxAncho = a;
++                if (b > maxAlto) maxAlto = b;
++            }
++            p = p->next;
++        } while (p && p != vga256InfoRec.modes);
++    }
++
++    for (i = 0; i < n && nc < MAXMODOS; i++) {
++        int ancho, alto, mbpp, modelo;
++        memset(&r, 0, sizeof r);
++        r.eax = 0x4F01; r.ecx = nums[i]; r.es = VBE_SEG; r.edi = VBE_OFF_MODE;
++        if (vbe(&r) || (r.eax & 0xFFFF) != 0x004F)
++            continue;
++        if ((mi[0] & 0x91) != 0x91)                  /* soportado + gráfico + lineal */
++            continue;
++        ancho = *(unsigned short *)(mi + 18); alto = *(unsigned short *)(mi + 20);
++        mbpp = mi[25]; modelo = mi[27];
++        if (bpp == 8 && !(mbpp == 8 && modelo == 4)) continue;
++        if (bpp == 16 && !((mbpp == 15 || mbpp == 16) && modelo == 6 && mi[33] == verde)) continue;
++        if ((bpp == 24 || bpp == 32) && !(mbpp == bpp && modelo == 6)) continue;
++        if (ancho > maxAncho || alto > maxAlto) continue;
++        if ((long)ancho * alto * (bpp / 8) > (long)memKB * 1024) continue;
++        sprintf(nombres[nc], "%dx%d", ancho, alto);
++        if (buscar(cand, nc, nombres[nc]) >= 0) continue;      /* el mismo tamaño dos veces (15 y 16 bits) */
++        llenar(&cand[nc], ancho, alto, nombres[nc]);
++        candVBE[nc] = nums[i];
++        candPitch[nc] = *(unsigned short *)(mi + 16);
++        if (!lineal) lineal = *(unsigned long *)(mi + 40);
++        nc++;
++    }
++    if (!nc || !lineal) {
++        ErrorF("%s %s: vesa: el BIOS no tiene modos lineales de %d bpp\n", XCONFIG_PROBED,
++               vga256InfoRec.name, bpp);
++        VESAEnterLeave(LEAVE);
++        return FALSE;
++    }
++
++    /* orden: el de XF86Config si hay Modes; si no, del mas grande al mas chico */
++    nModos = 0;
++    if (vga256InfoRec.modes) {
++        DisplayModePtr p = vga256InfoRec.modes;
++        do {
++            j = buscar(cand, nc, p->name);
++            if (j >= 0 && nModos < MAXMODOS) {
++                modos[nModos] = cand[j]; numeroVBE[nModos] = candVBE[j]; nModos++;
++            } else if (j < 0)
++                ErrorF("%s %s: vesa: el BIOS no tiene el modo %s a %d bpp, se omite\n", XCONFIG_PROBED,
++                       vga256InfoRec.name, p->name, bpp);
++            p = p->next;
++        } while (p && p != vga256InfoRec.modes);
++    }
++    if (!nModos) {
++        int usado[MAXMODOS];
++        memset(usado, 0, sizeof usado);
++        for (i = 0; i < nc; i++) {
++            int mejor = -1;
++            for (j = 0; j < nc; j++)
++                if (!usado[j] && (mejor < 0 ||
++                    (long)cand[j].HDisplay * cand[j].VDisplay > (long)cand[mejor].HDisplay * cand[mejor].VDisplay))
++                    mejor = j;
++            usado[mejor] = 1;
++            modos[nModos] = cand[mejor]; numeroVBE[nModos] = candVBE[mejor]; nModos++;
++            break;      /* sin Modes: un solo modo, el mayor (sin pantalla virtual ni paneo, como un juego de DOS) */
++        }
++    }
++    for (i = 0; i < nModos; i++) {                  /* lista circular */
++        modos[i].next = &modos[(i + 1) % nModos];
++        modos[i].prev = &modos[(i + nModos - 1) % nModos];
++        modos[i].Private = (INT32 *)&numeroVBE[i];
++        ErrorF("%s %s: vesa: modo %s = VBE 0x%x\n", XCONFIG_PROBED, vga256InfoRec.name,
++               modos[i].name, numeroVBE[i]);
++    }
++    VESA.ChipBuiltinModes = &modos[0];
++
++    if (!vga256InfoRec.videoRam)
++        vga256InfoRec.videoRam = memKB;
++    VESA.ChipLinearBase = lineal;
++    VESA.ChipLinearSize = vga256InfoRec.videoRam * 1024;
++    ErrorF("%s %s: vesa: framebuffer lineal en 0x%lx\n", XCONFIG_PROBED, vga256InfoRec.name, lineal);
++    vgaSetPitchAdjustHook(VESAPitch);
++
++    if (!vga256InfoRec.clocks) {                    /* nadie mide relojes: el BIOS pone los suyos */
++        vga256InfoRec.clocks = 1;
++        vga256InfoRec.clock[0] = 25175;
++    }
++    vga256InfoRec.maxClock = 1000000;
++    vga256InfoRec.chipset = VESAIdent(0);
++    vga256InfoRec.bankedMono = FALSE;
++    return TRUE;
++}
++
++/* ancho de línea en pixeles: múltiplo de 8 del virtual; el BIOS lo ajusta con 4F06 al poner cada modo */
++static int
++VESAPitch()
++{
++    int w = (vga256InfoRec.virtualX + 7) & ~7;
++    pitchBytes = w * (vga256InfoRec.bitsPerPixel / 8);
++    return w;
++}
++
++static void *
++VESASave(save)
++vgaVESAPtr save;
++{
++    VBERegs r;
++    save = (vgaVESAPtr)vgaHWSave((vgaHWPtr)save, sizeof(vgaVESARec));
++    memset(&r, 0, sizeof r);
++    r.eax = 0x4F03;
++    if (!vbe(&r) && (r.eax & 0xFFFF) == 0x004F)
++        save->vbeModo = r.ebx & 0x3FFF;
++    else
++        save->vbeModo = 3;
++    save->grafico = (save->vbeModo & 0x1FF) >= 0x100;
++    return (void *)save;
++}
++
++static void
++VESARestore(restore)
++vgaVESAPtr restore;
++{
++    VBERegs r;
++
++    if (restore->grafico) {
++        memset(&r, 0, sizeof r);
++        r.eax = 0x4F02; r.ebx = (restore->vbeModo & 0x1FF) | 0xC000;      /* lineal y sin borrar la memoria: X no redibuja al cambiar de modo */
++        if (vbe(&r) || (r.eax & 0xFFFF) != 0x004F) {
++            ErrorF("%s %s: vesa: 4F02 fallo con el modo 0x%x (ax=%04lx)\n", XCONFIG_PROBED,
++                   vga256InfoRec.name, restore->vbeModo, r.eax & 0xFFFF);
++            return;
++        }
++        if (vga256InfoRec.displayWidth) {
++            memset(&r, 0, sizeof r);
++            r.eax = 0x4F06; r.ebx = 0; r.ecx = vga256InfoRec.displayWidth;
++            vbe(&r);
++            if ((r.eax & 0xFFFF) != 0x004F || (int)(r.ecx & 0xFFFF) != vga256InfoRec.displayWidth)
++                ErrorF("%s %s: vesa: el BIOS dejo la linea en %ld pixeles (se pidieron %d)\n",
++                       XCONFIG_PROBED, vga256InfoRec.name, r.ecx & 0xFFFF, vga256InfoRec.displayWidth);
++        }
++    } else {
++        memset(&r, 0, sizeof r);
++        if (restore->vbeModo < 0x100)
++            r.eax = restore->vbeModo & 0xFF;          /* int 10h AH=0: modo de texto clásico */
++        else {
++            r.eax = 0x4F02; r.ebx = restore->vbeModo;
++        }
++        vbe(&r);
++        vgaProtect(TRUE);
++        vgaHWRestore((vgaHWPtr)restore);          /* registros y fuentes tal como estaban */
++        vgaProtect(FALSE);
++    }
++}
++
++static Bool
++VESAInit(mode)
++DisplayModePtr mode;
++{
++    if (!vgaHWInit(mode, sizeof(vgaVESARec)))
++        return FALSE;
++    new->vbeModo = mode->Private ? *(int *)mode->Private : numeroVBE[0];
++    new->grafico = TRUE;
++    return TRUE;
++}
++
++static void
++VESAAdjust(x, y)
++int x, y;
++{
++    static int avisado = 0;
++    VBERegs r, q;
++    memset(&r, 0, sizeof r);
++    r.eax = 0x4F07; r.ebx = 0; r.ecx = x; r.edx = y;
++    VBErmInt10(&r);
++    if (!avisado && (x || y)) {
++        memset(&q, 0, sizeof q); q.eax = 0x4F07; q.ebx = 1;      /* leer el comienzo que quedo */
++        VBErmInt10(&q);
++        if ((int)(q.ecx & 0xFFFF) != x || (int)(q.edx & 0xFFFF) != y) {
++            ErrorF("%s %s: vesa: el BIOS no respeta 4F07 (se pidio %d,%d y quedo %ld,%ld): el paneo de la "
++                   "pantalla virtual se vera corrido; use un solo modo en Modes\n", XCONFIG_PROBED,
++                   vga256InfoRec.name, x, y, q.ecx & 0xFFFF, q.edx & 0xFFFF);
++            avisado = 1;
++        }
++    }
++}
++
++static int
++VESAValidMode(mode, verbose, flag)
++DisplayModePtr mode;
++Bool verbose;
++int flag;
++{
++    return MODE_OK;
++}

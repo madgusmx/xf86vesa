@@ -1,0 +1,45 @@
+# XF86Config para el driver VESA (retroblog): sin modelines, sin relojes, sin frecuencias.
+Section "Files"
+    RgbPath     "/usr/X11R6/lib/X11/rgb"
+    FontPath    "/usr/X11R6/lib/X11/fonts/misc/"
+    FontPath    "/usr/X11R6/lib/X11/fonts/75dpi/:unscaled"
+    FontPath    "/usr/X11R6/lib/X11/fonts/100dpi/:unscaled"
+    FontPath    "/usr/X11R6/lib/X11/fonts/Type1/"
+    FontPath    "/usr/X11R6/lib/X11/fonts/Speedo/"
+    FontPath    "/usr/X11R6/lib/X11/fonts/75dpi/"
+    FontPath    "/usr/X11R6/lib/X11/fonts/100dpi/"
+EndSection
+
+Section "Keyboard"
+    Protocol    "Standard"
+    XkbRules    "xfree86"
+    XkbModel    "pc104"
+    XkbLayout   "us"
+EndSection
+
+Section "Pointer"
+    Protocol    "PS/2"
+    Device      "/dev/psaux"
+EndSection
+
+Section "Monitor"
+    Identifier  "Cualquiera"
+EndSection
+
+Section "Device"
+    Identifier  "VESA"
+    Chipset     "vesa"
+EndSection
+
+Section "Screen"
+    Driver      "svga"
+    Device      "VESA"
+    Monitor     "Cualquiera"
+    DefaultColorDepth 16
+    SubSection "Display"
+        Depth   16
+    EndSubSection
+    SubSection "Display"
+        Depth   8
+    EndSubSection
+EndSection

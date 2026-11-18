@@ -1,0 +1,21 @@
+#!/bin/sh
+# vesaconfig - deja el servidor X con el driver VESA (xf86vesa), o lo deshace.
+#   vesaconfig            usa XF86_VESA y /usr/X11R6/lib/X11/XF86Config.vesa (respalda lo anterior)
+#   vesaconfig --deshacer vuelve a la configuracion y al servidor que habia antes
+#   vesaconfig --si-falta solo si no hay /etc/XF86Config (lo usa el %post del paquete)
+L=/var/X11R6/bin/X
+case "$1" in
+--deshacer)
+    [ -f /etc/XF86Config.antes-vesa ] && mv /etc/XF86Config.antes-vesa /etc/XF86Config
+    if [ -f /etc/X.antes-vesa ]; then ln -sf "`cat /etc/X.antes-vesa`" $L; rm -f /etc/X.antes-vesa; fi
+    echo "vesaconfig: se restauro la configuracion anterior"
+    exit 0 ;;
+--si-falta)
+    [ -f /etc/XF86Config ] && exit 0 ;;
+esac
+mkdir -p /var/X11R6/bin
+[ -f /etc/XF86Config ] && [ ! -f /etc/XF86Config.antes-vesa ] && cp /etc/XF86Config /etc/XF86Config.antes-vesa
+[ -L $L ] && [ ! -f /etc/X.antes-vesa ] && ls -l $L | sed 's/.*-> //' > /etc/X.antes-vesa
+cp /usr/X11R6/lib/X11/XF86Config.vesa /etc/XF86Config
+ln -sf /usr/X11R6/bin/XF86_VESA $L
+echo "vesaconfig: X usara el driver VESA. Modos del BIOS: vbeinfo. Deshacer: vesaconfig --deshacer"
