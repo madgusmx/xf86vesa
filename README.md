@@ -13,7 +13,7 @@ Un driver VESA para XFree86 3.3.2: X sin modelines en el Linux de 1998.
 **[Un driver VESA para XFree86 3.3.2](https://www.canaldelasrecetas.com/cms/retro-suse53-driver-vesa-es/)** ·
 previous chapter: [KDE 1.0 on SuSE Linux 5.3](https://www.canaldelasrecetas.com/cms/retro-suse53-kde1-en/)
 
-📦 **Download:** `xf86vesa-1.0-1.i386.rpm`, `xf86vesa-1.0-1.src.rpm` and the YaST add-on CD `xf86vesa-1.0-cd.iso` in the [latest release](../../releases/latest).
+📦 **Download:** `xf86vesa-1.0-1.i386.rpm`, `xf86vesa-1.0-1.src.rpm` the YaST add-on CD `xf86vesa-1.0-cd.iso` and the same on a 1.44 MB floppy `xf86vesa-1.0-floppy.img` in the [latest release](../../releases/latest).
 
 ![KDE 1.0 at 1280x1024 on the VESA driver](doc/00-portada-kde-vesa-1280.png)
 
@@ -42,6 +42,10 @@ installation medium: it only lists `xf86vesa` in series `xsrv`. Attach it (or bu
 and finally `vesaconfig`. It has no SuSE files: [`cd/armar_cd.sh`](cd/armar_cd.sh) builds it from the RPM.
 YaST checks three things on a medium: the package descriptions (`suse/setup/descr/*.pkd`), the series
 descriptions (`*.ser`) and a disc marker (`/.S.u.S.E-disk-001`, or it says «Wrong CD»).
+
+There is also a **1.44 MB floppy** version, `xf86vesa-1.0-floppy.img` (ext2 revision 0, readable by Linux 2.0; built by
+[`cd/armar_floppy.sh`](cd/armar_floppy.sh)): `mount -t ext2 /dev/fd0 /mnt`, then in YaST pick the installation
+source «directory» `/mnt`, or simply `rpm -i /mnt/suse/xsrv1/xf86vesa.rpm`.
 
 | | | |
 |---|---|---|

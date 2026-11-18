@@ -127,6 +127,9 @@ YaST only sees xf86vesa on this CD; the rest of SuSE stays as installed.
 https://github.com/madgusmx/xf86vesa  -  https://www.canaldelasrecetas.com/cms/retro-suse53-driver-vesa-en/
 EOF
 
+if [ -n "$SOLO_ARBOL" ]; then                   # used by armar_floppy.sh: just leave the tree there
+    cp -a $T/. "$SOLO_ARBOL"/; rm -rf $T; exit 0
+fi
 MK=$(command -v genisoimage || command -v mkisofs)
 $MK -quiet -r -J -V XF86VESA -A "xf86vesa 1.0 add-on CD for SuSE Linux 5.3" -o "$OUT" $T
 rm -rf $T
