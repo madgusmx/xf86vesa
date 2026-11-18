@@ -13,7 +13,7 @@ Un driver VESA para XFree86 3.3.2: X sin modelines en el Linux de 1998.
 **[Un driver VESA para XFree86 3.3.2](https://www.canaldelasrecetas.com/cms/retro-suse53-driver-vesa-es/)** ·
 previous chapter: [KDE 1.0 on SuSE Linux 5.3](https://www.canaldelasrecetas.com/cms/retro-suse53-kde1-en/)
 
-📦 **Download:** `xf86vesa-1.0-1.i386.rpm` and `xf86vesa-1.0-1.src.rpm` in the [latest release](../../releases/latest).
+📦 **Download:** `xf86vesa-1.0-1.i386.rpm`, `xf86vesa-1.0-1.src.rpm` and the YaST add-on CD `xf86vesa-1.0-cd.iso` in the [latest release](../../releases/latest).
 
 ![KDE 1.0 at 1280x1024 on the VESA driver](doc/00-portada-kde-vesa-1280.png)
 
@@ -33,6 +33,19 @@ previous chapter: [KDE 1.0 on SuSE Linux 5.3](https://www.canaldelasrecetas.com/
 | | |
 |---|---|
 | ![YaST: xf86vesa in series xsrv](doc/18-yast-xf86vesa-marcado.png) | ![YaST: INSTALLATION COMPLETE](doc/22-yast-installation-complete.png) |
+
+## Add-on CD for YaST
+
+`xf86vesa-1.0-cd.iso` (in the [release](../../releases/latest), 1.7 MB) is a CD that YaST 0.97 accepts as its
+installation medium: it only lists `xf86vesa` in series `xsrv`. Attach it (or burn it), then `yast` →
+*Choose/Install packages* → *Change/create configuration* → `xsrv` → mark `xf86vesa` → F10 → *Start installation*,
+and finally `vesaconfig`. It has no SuSE files: [`cd/armar_cd.sh`](cd/armar_cd.sh) builds it from the RPM.
+YaST checks three things on a medium: the package descriptions (`suse/setup/descr/*.pkd`), the series
+descriptions (`*.ser`) and a disc marker (`/.S.u.S.E-disk-001`, or it says «Wrong CD»).
+
+| | | |
+|---|---|---|
+| ![YaST sees the add-on CD](doc/23-cd-yast-series.png) | ![xf86vesa marked](doc/24-cd-yast-marcado.png) | ![INSTALLATION COMPLETE](doc/25-cd-yast-instalado.png) |
 
 ## What it is
 A «non-picky» X for 1998 Linux: **no modelines, no clocks, no monitor frequencies**. The driver asks the video
