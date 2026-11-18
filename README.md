@@ -1,17 +1,47 @@
-# xf86vesa — a VESA (VBE 2.0) driver for XFree86 3.3.2
+# xf86vesa
 
-*[Español abajo](#español)*
+**A VESA (VBE 2.0) driver for XFree86 3.3.2 — X without modelines on 1998 Linux.**
+Un driver VESA para XFree86 3.3.2: X sin modelines en el Linux de 1998.
 
+[![Release](https://img.shields.io/badge/release-v1.0-blue)](../../releases/latest)
+![XFree86 3.3.2](https://img.shields.io/badge/XFree86-3.3.2-orange)
+![SuSE Linux 5.3](https://img.shields.io/badge/SuSE_Linux-5.3_(1998)-green)
+![Linux 2.0](https://img.shields.io/badge/kernel-2.0.35-lightgrey)
+![License MIT/X11](https://img.shields.io/badge/license-MIT%2FX11-yellow)
+
+📖 The story: **[A VESA driver for XFree86 3.3.2](https://www.canaldelasrecetas.com/cms/retro-suse53-driver-vesa-en/)** ·
+**[Un driver VESA para XFree86 3.3.2](https://www.canaldelasrecetas.com/cms/retro-suse53-driver-vesa-es/)** ·
+previous chapter: [KDE 1.0 on SuSE Linux 5.3](https://www.canaldelasrecetas.com/cms/retro-suse53-kde1-en/)
+
+📦 **Download:** `xf86vesa-1.0-1.i386.rpm` and `xf86vesa-1.0-1.src.rpm` in the [latest release](../../releases/latest).
+
+![KDE 1.0 at 1280x1024 on the VESA driver](doc/00-portada-kde-vesa-1280.png)
+
+## Before / after
+
+| Before: XFree86 3.3.2 the 1998 way | After: the VESA driver |
+|---|---|
+| ![SaX: No valid modes found](doc/01-antes-no-valid-modes.png) | ![vbeinfo: the modes of the video BIOS](doc/03-vbeinfo-cirrus.png) |
+| SaX measures every clock as 28.32 MHz: *No valid modes found* | `vbeinfo` asks the video BIOS for its VBE modes |
+| ![no screens found](doc/16-sin-driver-no-screens.png) | ![The whole XF86Config](doc/09-xf86config-vesa.png) |
+| Standard VGA without the driver: *no screens found* | The whole XF86Config: `Chipset "vesa"`, a monitor with just a name |
+| ![First X with the driver](doc/05-primer-x-trama-1280.png) | ![KDE on the standard VGA](doc/15-kde-vga-std.png) |
+| First start: the grey weave at 1280x1024, on the first try | KDE 1.0 on QEMU's standard VGA, same binary, same file |
+
+### Installed with YaST 0.97.2
+
+| | |
+|---|---|
+| ![YaST: xf86vesa in series xsrv](doc/18-yast-xf86vesa-marcado.png) | ![YaST: INSTALLATION COMPLETE](doc/22-yast-installation-complete.png) |
+
+## What it is
 A «non-picky» X for 1998 Linux: **no modelines, no clocks, no monitor frequencies**. The driver asks the video
 BIOS which modes it has (VBE `4F00`/`4F01`) and sets them with the same BIOS (`4F02`, linear framebuffer), like DOS
 games did. The BIOS is called in real mode through Linux 2.0's `vm86()` system call, with a tiny LRMI-style layer
 that emulates the BIOS's IN/OUT instructions.
 
-Written in 2026 for **SuSE Linux 5.3** (kernel 2.0.35, XFree86 3.3.2.3, libc5) by the retroblog.
-Full story: [KDE 1.0 on SuSE Linux 5.3](https://www.canaldelasrecetas.com/cms/retro-suse53-kde1-en/) ·
-[A VESA driver for XFree86 3.3.2](https://www.canaldelasrecetas.com/cms/retro-suse53-driver-vesa-en/)
-
-![KDE 1.0 at 1280x1024 on the VESA driver](doc/00-portada-kde-vesa-1280.png)
+Written in 2026 for **SuSE Linux 5.3** (kernel 2.0.35, XFree86 3.3.2.3, libc5) by the
+[retroblog](https://www.canaldelasrecetas.com/cms/hot-shareware-hobby-press/).
 
 ## The whole XF86Config
 
@@ -43,7 +73,7 @@ panning). With `Modes "1024x768" "800x600"` it uses those; Ctrl+Alt+Keypad-Plus 
 | `src/vesaconfig` | switches X to the VESA server (`--deshacer` restores the previous setup) |
 | `rpm/xf86vesa.spec` | RPM 2.4 spec (needs a built XFree86 3.3.2 tree in `/usr/src/packages/BUILD/xc`) |
 
-Binary RPMs (`xf86vesa-1.0-1.i386.rpm`, `.src.rpm`) are in the GitHub release.
+Binary RPMs (`xf86vesa-1.0-1.i386.rpm`, `.src.rpm`) are in the [release](../../releases/latest).
 
 ## Build
 
