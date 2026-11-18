@@ -41,7 +41,7 @@ games did. The BIOS is called in real mode through Linux 2.0's `vm86()` system c
 that emulates the BIOS's IN/OUT instructions.
 
 Written in 2026 for **SuSE Linux 5.3** (kernel 2.0.35, XFree86 3.3.2.3, libc5) by the
-[retroblog](https://www.canaldelasrecetas.com/cms/hot-shareware-hobby-press/).
+[retroblog](https://www.canaldelasrecetas.com/cms/retro-suse53-driver-vesa-en/).
 
 ## The whole XF86Config
 
